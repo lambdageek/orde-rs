@@ -1,2 +1,6 @@
+#Rust stucc
 /target
 **/*.rs.bk
+
+# Emacs backup files
+*~
