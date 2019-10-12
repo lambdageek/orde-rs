@@ -2,8 +2,8 @@
 /// SECD machine
 ///
 /// Env :: {} | Env*val
-/// val ::= () | clo (E) m
-/// C ::= [] m | (clo (E) m) []
+/// val ::= () | clo (E) m | inj dir val
+/// C ::= [] m | (clo (E) m) [] | inj dir [] | case [] m1 m2
 ///
 /// K ::= eval: m | ret: val
 /// S ::= # | C ; S
@@ -15,12 +15,16 @@
 /// Env | eval:() | S | D ---> Env | ret: () | S | D
 /// Env | eval:lam m | S | D ---> Env | ret: clo (Env) m | S | D
 /// Env | eval:app m1 m2 | S | D ---> Env | eval: m1 | [] m2 ; S | D
+/// Env | eval:inj A dir m | S | D ---> Env | eval: m | inj dir [] ; S | D
+/// Env | eval:case A m l r | S | D ---> Env | eval: m | case [] l r ; S | D
 ///
 /// {} | ret:val | # | done    terminal
 ///
 /// _  | ret:val | # | pop (Env + S) then D  ---> Env | ret: val | S | D
+/// Env | ret: val | inj dir [] ; S | D  ---> Env | ret: inj dir val | S | D
 /// Env | ret:(clo Env2 m) | [] m2 ; S | D  ---> Env | eval: m2 | (clo Env2 m) [] ; S | D
 /// Env | ret:val | clo (Env2 m) [] ; S | D ---> Env2*val | eval: m | # | pop (Env + S) then D
+/// Env | ret:inj dir val | case [] l r ; S | D --> Env*val | eval: dir.select(l,r) | S | D
 
 use super::*;
 
@@ -30,7 +34,8 @@ pub struct Closure<'s> {env: RcEnv<'s>, body: RcTerm<'s> }
 #[derive(Debug)]
 pub enum Val<'s> {
     Unit,
-    Closure (Closure<'s>)
+    Closure (Closure<'s>),
+    Inj (Dir, RcVal<'s>)
 }
 
 impl<'s> PartialEq for Val<'s> {
@@ -47,6 +52,10 @@ type RcVal<'s> = Rc<Val<'s>>;
 impl<'s> Val<'s> {
     pub fn unit() -> RcVal<'s> {
 	Rc::new (Val::Unit)
+    }
+
+    pub fn inj(dir: Dir, val: RcVal<'s>) -> RcVal<'s> {
+	Rc::new (Val::Inj (dir, val))
     }
 }
 
@@ -78,7 +87,9 @@ impl<'s> Env<'s> {
 #[derive(Debug)]
 pub enum Cont<'s> {
     App1 (RcTerm<'s>),
-    App2 (Closure<'s>)
+    App2 (Closure<'s>),
+    Inj (Dir),
+    Case (Bind<RcTerm<'s>>, Bind<RcTerm<'s>>)
 }
 
 #[derive(Debug)]
@@ -102,6 +113,13 @@ impl<'s> Stack<'s> {
 	Rc::new (Stack::Cons(Cont::App2(clo), stk))
     }
 
+    pub fn inj (dir: Dir, stk: RcStack<'s>) -> RcStack<'s> {
+	Rc::new (Stack::Cons(Cont::Inj(dir), stk))
+    }
+
+    pub fn case (left: Bind<RcTerm<'s>>, right: Bind<RcTerm<'s>>, stk: RcStack<'s>) -> RcStack<'s> {
+	Rc::new (Stack::Cons(Cont::Case(left,right), stk))
+    }
 }
 
 #[derive(Debug,Clone)]
@@ -160,6 +178,7 @@ pub enum DynamicErr<'s> {
     UnboundVariable(u32),
     UnboundGlobal(&'s str),
     ApplicationNotClosure,
+    CaseNotInj,
 }
 
 
@@ -181,6 +200,13 @@ fn expect_closure<'s> (val: RcVal<'s>) -> Result<Closure<'s>, DynamicErr<'s>> {
     }
 }
 
+fn expect_inj<'s> (val: RcVal<'s>) -> Result<(Dir, RcVal<'s>), DynamicErr<'s>> {
+    match &*val {
+	Val::Inj (dir, val) => Ok ((*dir, val.clone())),
+	_ => Err(DynamicErr::CaseNotInj)
+    }
+}
+
 pub fn step<'s> (cfg: Config<'s>) -> Result<Config<'s>, DynamicErr<'s>> {
     match cfg {
 	Config {control: Control::Eval (tm), env, stack, dump} =>
@@ -196,6 +222,13 @@ pub fn step<'s> (cfg: Config<'s>) -> Result<Config<'s>, DynamicErr<'s>> {
 		    Ok (Config {control: Control::Eval (tm1.clone ()), env, stack: Stack::app1 (tm2.clone (), stack), dump}),
 
 		Term::Unit => Ok (Config {control: Control::Ret (Val::unit()), env, stack, dump}),
+
+		Term::Inj(dir, _ty, tm) => Ok (Config { control: Control::Eval(tm.clone ()), env, stack: Stack::inj (*dir, stack), dump }),
+		Term::Case(_ty, tm, left, right) =>
+		    Ok (Config { control: Control::Eval(tm.clone ()),
+				 env,
+				 stack: Stack::case (left.clone(), right.clone(), stack),
+				 dump }),
 	    }
 	Config {control: Control::Ret (val), env, stack, dump} =>
 	    match &*stack {
@@ -223,6 +256,19 @@ pub fn step<'s> (cfg: Config<'s>) -> Result<Config<'s>, DynamicErr<'s>> {
 					env: env3,
 					stack: Stack::nil (),
 					dump: dump})
+			},
+			Cont::Inj(dir) =>
+			    Ok (Config {control: Control::Ret (Val::inj(*dir, val)),
+					env,
+					stack: stack.clone (),
+					dump}),
+			Cont::Case(left, right) => {
+			    let (dir, val) = expect_inj (val)?;
+			    let env = Env::snoc (env.clone (), val);
+			    Ok (Config {control: Control::Eval (dir.select (left.clone(), right.clone())),
+					env,
+					stack: stack.clone(),
+					dump })
 			}
 		    }
 	    }
@@ -238,6 +284,24 @@ pub fn eval<'s> (term: RcTerm<'s>) -> Result<RcVal<'s>, DynamicErr<'s>> {
 	    c = step (c)?;
 	}
     }
+}
+
+#[derive(Debug)]
+pub enum Stepped<'s> {
+    Done (RcVal<'s>),
+    NotDone (Config<'s>),
+}
+
+pub fn step_n<'s> (term: RcTerm<'s>, n: u32) -> Result<Stepped<'s>, DynamicErr<'s>> {
+    let mut c = Config::initial (term);
+    for _ in 0..n {
+	if let Some(v) = is_done (&c) {
+	    return Ok(Stepped::Done(v));
+	} else {
+	    c = step (c)?;
+	}
+    }
+    Ok(Stepped::NotDone (c))
 }
 
 #[cfg(test)]
@@ -262,5 +326,41 @@ mod tests {
 	let id = Term::lam (uty, Term::local_var (0));
 	let term = Term::app (id, Term::unit ());
 	assert_eq! (format! ("{:?}", eval (term)), "Ok(Unit)");
+    }
+
+    #[test]
+    fn eval_tt_inl() {
+	let boolty = Type::sum(Type::unit(), Type::unit());
+	let tr = Term::inl(boolty.clone(), Term::unit());
+	let tt = Term::lam(boolty.clone(), Term::lam(boolty.clone(), Term::local_var (1)));
+	let prog = Term::app (tt, tr);
+	let ans = eval (prog);
+	assert_eq! (format! ("{:?}", ans), "Ok(Closure(Closure { env: Snoc(Nil, Inj(Left, Unit)), body: Var(Local(1)) }))");
+	    
+    }
+
+    #[test]
+    fn eval_lam_case() {
+	// type 2 = () + ()
+	// let tr = inl 2 ()
+	// let fa = inr 2 ()
+	// let tt = \x:2.\y:2.x
+	// let ff = \x:2.\y:2.y
+	// (\u. case (2->2) u {x. x tr} {x. x fa}) (inl (2 -> 2 -> 2)+... tt)
+	let boolty = Type::sum(Type::unit(), Type::unit());
+	let tr = Term::inl(boolty.clone(), Term::unit());
+	let fa = Term::inr(boolty.clone(), Term::unit());
+	let tt = Term::lam(boolty.clone(), Term::lam(boolty.clone(), Term::local_var (1)));
+	let _ff = Term::lam(boolty.clone(), Term::lam(boolty.clone(), Term::local_var (0)));
+	let left = Term::app(Term::local_var(0), tr.clone());
+	let right = Term::app(Term::local_var(0), fa.clone());
+	let b2b = Type::arr(boolty.clone(), boolty.clone());
+	let b22b = Type::arr(boolty.clone(), b2b.clone());
+	let c = Term::case (b2b.clone(), Term::local_var(0), left, right);
+	let sumb22b = Type::sum(b22b.clone(), b22b.clone ());
+	let l = Term::lam (sumb22b.clone(), c);
+	let prog = Term::app (l, Term::inl(sumb22b, tt.clone()));
+	let ans = eval(prog);
+	assert_eq!(format!("{:?}", ans), "Ok(Closure(Closure { env: Snoc(Nil, Inj(Left, Unit)), body: Var(Local(1)) }))");
     }
 }

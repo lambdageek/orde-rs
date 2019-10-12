@@ -5,9 +5,10 @@ use std::rc::Rc;
 pub mod statics;
 pub mod dynamics;
 
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Debug,PartialEq,Eq,Clone)]
 pub enum Type {
     Unit,
+    Sum(RcType, RcType),
     Arr(RcType, RcType),
 }
 
@@ -15,6 +16,7 @@ pub type RcType = Rc<Type>;
 
 impl Type {
     pub fn unit() -> RcType { Rc::new (Type::Unit) }
+    pub fn sum(tleft: RcType, tright: RcType) -> RcType { Rc::new (Type::Sum(tleft, tright)) }
     pub fn arr(tdom: RcType, tcod: RcType) -> RcType { Rc::new (Type::Arr(tdom, tcod)) }
 }
 
@@ -24,11 +26,27 @@ pub enum Var<'s> {
     Global(&'s str)
 }
 
+#[derive(Debug,Copy,Clone)]
+pub enum Dir { Left, Right }
+
+impl Dir {
+    pub fn select<T> (&self, left: T, right: T) -> T {
+	match &self {
+	    Dir::Left => left,
+	    Dir::Right => right
+	}
+    }
+}
+
+type Bind<T> = T;
+
 #[derive(Debug)]
 pub enum Term<'s> {
     Var(Var<'s>),
-    Lam(RcType, RcTerm<'s>),
+    Lam(RcType, Bind<RcTerm<'s>>),
     App(RcTerm<'s>, RcTerm<'s>),
+    Inj(Dir, RcType, RcTerm<'s>),
+    Case(RcType, RcTerm<'s>, Bind<RcTerm<'s>>, Bind<RcTerm<'s>>),
     Unit
 }
 
@@ -55,11 +73,22 @@ impl<'s> Var<'s> {
 }
 
 impl<'s> Term<'s> {
+    pub fn local_var(idx: u32) -> RcTerm<'s> { Rc::new (Term::Var (Var::Local (idx))) }
+
     pub fn unit() -> RcTerm<'s> { Rc::new (Term::Unit) }
-    pub fn lam(ty: RcType, body: RcTerm<'s>) -> RcTerm<'s> { Rc::new (Term::Lam (ty, body)) }
+    pub fn lam(ty: RcType, body: Bind<RcTerm<'s>>) -> RcTerm<'s> { Rc::new (Term::Lam (ty, body)) }
     pub fn app(fun: RcTerm<'s>, arg: RcTerm<'s>) -> RcTerm<'s> { Rc::new (Term::App (fun, arg)) }
 
-    pub fn local_var(idx: u32) -> RcTerm<'s> { Rc::new (Term::Var (Var::Local (idx))) }
+    pub fn inj(dir: Dir, ty: RcType, term: RcTerm<'s>) -> RcTerm<'s> {
+	Rc::new (Term::Inj (dir, ty, term))
+    }
+
+    pub fn inl (ty:RcType, term: RcTerm<'s>) -> RcTerm<'s> { Term::inj (Dir::Left, ty, term) }
+    pub fn inr (ty:RcType, term: RcTerm<'s>) -> RcTerm<'s> { Term::inj (Dir::Right, ty, term) }
+
+    pub fn case (ty: RcType, subj: RcTerm<'s>, left: Bind<RcTerm<'s>>, right: Bind<RcTerm<'s>>) -> RcTerm<'s> {
+	Rc::new (Term::Case (ty, subj, left, right))
+    }
 }
 
 

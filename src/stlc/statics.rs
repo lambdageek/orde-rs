@@ -29,6 +29,7 @@ pub enum TypeError<'s> {
     NoGlobalVariable(&'s str),
     NoLocalVariable(u32),
     ExpectedFunctionTypeGot(RcType),
+    ExpectedSumTypeGot(RcType),
     ExpectedTypeMismatch {wanted: RcType, given: RcType}
 }
 
@@ -55,6 +56,13 @@ fn expect_arr<'s>(ty: RcType) -> Result<(RcType,RcType), TypeError<'s>> {
     }
 }
 
+fn expect_sum<'s>(ty: RcType) -> Result<(RcType,RcType), TypeError<'s>> {
+    match &*ty {
+	Type::Sum(tleft, tright) => Ok ((tleft.clone(), tright.clone())),
+	_ => Err(TypeError::ExpectedSumTypeGot(ty.clone()))
+    }
+}
+
 fn expect_eq<'s>(wanted: RcType, given: RcType) -> Result<(), TypeError<'s>> {
     if *wanted == *given {
 	Ok(())
@@ -63,13 +71,19 @@ fn expect_eq<'s>(wanted: RcType, given: RcType) -> Result<(), TypeError<'s>> {
     }
 }
 
+pub fn extend_and_check<'a,'s>(ctx: &'a Ctx<'a>, ty: RcType, body: &Bind<Term<'s>>) -> Result<RcType, TypeError<'s>> {
+    let ctx = Ctx::snoc (ctx, ty);
+    check (&ctx, body)
+}
+
 pub fn check<'a,'s>(ctx: &'a Ctx<'a>, term: &Term<'s>) -> Result<RcType, TypeError<'s>> {
     match term {
         Term::Unit => Ok (Rc::new(Type::Unit)),
         Term::Var(v) => infer_var(ctx, v),
 	Term::Lam(ty, term) => {
-	    let ctx = Ctx::snoc (ctx, ty.clone ());
-	    let tycod = check (&ctx, term)?;
+	    // let ctx = Ctx::snoc (ctx, ty.clone ());
+	    //let tycod = check (&ctx, term)?;
+	    let tycod = extend_and_check (ctx, ty.clone(), term)?;
 	    Ok (Type::arr ((*ty).clone(), tycod))
 	}
 	Term::App (term1, term2) => {
@@ -78,6 +92,22 @@ pub fn check<'a,'s>(ctx: &'a Ctx<'a>, term: &Term<'s>) -> Result<RcType, TypeErr
 	    let tyarg2 = check (ctx, term2)?;
 	    expect_eq (tyarg, tyarg2)?;
 	    Ok (tyres)
+	}
+	Term::Inj (dir, ty, term) => {
+	    let (tleft, tright) = expect_sum (ty.clone())?;
+	    let ty = dir.select (tleft, tright);
+	    let tinfer = check (ctx, term)?;
+	    expect_eq (ty.clone (), tinfer)?;
+	    Ok (ty)
+	}
+	Term::Case (tres, subj, left, right) => {
+	    let tysubj = check (ctx, subj)?;
+	    let (tleft, tright) = expect_sum (tysubj)?;
+	    let tleft = extend_and_check (ctx, tleft, left)?;
+	    let tright = extend_and_check (ctx, tright, right)?;
+	    expect_eq (tres.clone (), tleft)?;
+	    expect_eq (tres.clone (), tright)?;
+	    Ok (tres.clone ())
 	}
     }
 }
