@@ -2,7 +2,7 @@
 // 
 use std::rc::Rc;
 
-mod statics;
+pub mod statics;
 
 #[derive(Debug,PartialEq,Eq)]
 pub enum Type {
@@ -51,6 +51,14 @@ impl<'s> Var<'s> {
             Var::Global(_) => false,
         }
     }
+}
+
+impl<'s> Term<'s> {
+    pub fn unit() -> RcTerm<'s> { Rc::new (Term::Unit) }
+    pub fn lam(ty: RcType, body: RcTerm<'s>) -> RcTerm<'s> { Rc::new (Term::Lam (ty, body)) }
+    pub fn app(fun: RcTerm<'s>, arg: RcTerm<'s>) -> RcTerm<'s> { Rc::new (Term::App (fun, arg)) }
+
+    pub fn local_var(idx: u32) -> RcTerm<'s> { Rc::new (Term::Var (Var::Local (idx))) }
 }
 
 
