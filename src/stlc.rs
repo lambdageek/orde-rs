@@ -18,24 +18,24 @@ impl Type {
 }
 
 #[derive(Debug)]
-pub enum Var {
+pub enum Var<'s> {
     Local(u32),
-    Global(String)
+    Global(&'s str)
 }
 
 #[derive(Debug)]
-pub enum Term {
-    Var(Var),
-    Lam(RcType, RcTerm),
-    App(RcTerm, RcTerm),
+pub enum Term<'s> {
+    Var(Var<'s>),
+    Lam(RcType, RcTerm<'s>),
+    App(RcTerm<'s>, RcTerm<'s>),
     Unit
 }
 
-pub type RcTerm = Rc<Term>;
+pub type RcTerm<'s> = Rc<Term<'s>>;
 
 pub mod variables {
     use super::*;
-    pub fn shift (n: u32, v: &Var) -> Option<Var> {
+    pub fn shift<'s> (n: u32, v: &Var<'s>) -> Option<Var<'s>> {
         match v {
             Var::Local(m) => Some(Var::Local(n + m)),
             Var::Global(_s) => None
@@ -44,7 +44,7 @@ pub mod variables {
 
 }
 
-impl Var {
+impl<'s> Var<'s> {
     pub fn is_local (&self) -> bool {
         match self {
             Var::Local(_) => true,

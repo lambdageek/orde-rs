@@ -23,28 +23,28 @@ impl<'a> Ctx<'a> {
 }
 
 #[derive(Debug,PartialEq,Eq)]
-pub enum TypeError {
+pub enum TypeError<'s> {
     NotImplemented,
-    NoGlobalVariable(String),
+    NoGlobalVariable(&'s str),
     NoLocalVariable(u32)
 }
 
-fn not_implemented() -> Result<RcType, TypeError> {
+fn not_implemented<'s>() -> Result<RcType, TypeError<'s>> {
     Err(TypeError::NotImplemented)
 }
 
 
-fn infer_var<'a>(ctx: &'a Ctx<'a>, var: &Var) -> Result<RcType, TypeError> {
+fn infer_var<'a,'s>(ctx: &'a Ctx<'a>, var: &Var<'s>) -> Result<RcType, TypeError<'s>> {
     match var {
         Var::Local(idx) => match ctx.lookup (*idx) {
             Some(ty) => Ok(ty.clone()),
             None => Err(TypeError::NoLocalVariable(*idx))
         }
-        Var::Global(str) => Err(TypeError::NoGlobalVariable(str.clone()))
+        Var::Global(str) => Err(TypeError::NoGlobalVariable(str))
     }
 }
 
-pub fn check<'a>(ctx: &'a Ctx<'a>, term: &Term) -> Result<RcType, TypeError> {
+pub fn check<'a,'s>(ctx: &'a Ctx<'a>, term: &Term<'s>) -> Result<RcType, TypeError<'s>> {
     match term {
         Term::Unit => Ok (Rc::new(Type::Unit)),
         Term::Var(v) => infer_var(ctx, v),
