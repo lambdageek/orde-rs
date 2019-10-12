@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 pub mod statics;
+pub mod dynamics;
 
 #[derive(Debug,PartialEq,Eq)]
 pub enum Type {
