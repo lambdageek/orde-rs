@@ -1,5 +1,6 @@
-// Simply Typed Lambda Calculus  syntax
-// 
+//! Simply Typed Lambda Calculus
+//!
+
 use std::rc::Rc;
 
 pub mod statics;
@@ -7,8 +8,11 @@ pub mod dynamics;
 
 #[derive(Debug,PartialEq,Eq,Clone)]
 pub enum Type {
+    /// ()
     Unit,
+    /// τ+τ
     Sum(RcType, RcType),
+    /// τ→τ
     Arr(RcType, RcType),
 }
 
@@ -22,7 +26,9 @@ impl Type {
 
 #[derive(Debug)]
 pub enum Var<'s> {
+    /// Local variable with its DeBruijn index
     Local(u32),
+    /// Global variable identified by its name
     Global(&'s str)
 }
 
@@ -38,14 +44,20 @@ impl Dir {
     }
 }
 
+/// A marker to indicate a binding form
 type Bind<T> = T;
 
 #[derive(Debug)]
 pub enum Term<'s> {
+    /// x
     Var(Var<'s>),
+    /// λ:τ.m
     Lam(RcType, Bind<RcTerm<'s>>),
+    /// m₁ m₂
     App(RcTerm<'s>, RcTerm<'s>),
+    /// in{l/r}:τ m
     Inj(Dir, RcType, RcTerm<'s>),
+    /// case:τ (m; .m; .m)
     Case(RcType, RcTerm<'s>, Bind<RcTerm<'s>>, Bind<RcTerm<'s>>),
     Unit
 }
